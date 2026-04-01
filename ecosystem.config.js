@@ -33,6 +33,20 @@ module.exports = {
                 PORT: "3333",
                 GUI_AUTH_TOKEN: process.env.GUI_AUTH_TOKEN || ""
             }
+        },
+        {
+            name: "ns-deploy",
+            script: "scripts/webhook-deploy.js",
+            cwd: __dirname,
+            exec_mode: "fork",
+            instances: 1,
+            autorestart: true,
+            watch: false,
+            max_memory_restart: "200M",
+            env: {
+                NODE_ENV: "production",
+                WEBHOOK_SECRET: "asad-deploy-secret-2026"
+            }
         }
     ]
 };

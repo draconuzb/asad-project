@@ -1,0 +1,27 @@
+{
+    "name": "ns-bot",
+    "version": "1.0.0",
+    "description": "Nodir School 2-Sided Telegram Bot",
+    "main": "bot.js",
+    "scripts": {
+        "start": "node bot.js",
+        "dev": "node bot.js",
+        "test": "jest --forceExit --detectOpenHandles",
+        "test:watch": "jest --watch",
+        "test:coverage": "jest --coverage --forceExit"
+    },
+    "dependencies": {
+        "@google/generative-ai": "^0.21.0",
+        "better-sqlite3": "^12.8.0",
+        "dotenv": "^17.3.1",
+        "express-rate-limit": "^8.3.1",
+        "googleapis": "^171.4.0",
+        "node-cron": "^4.2.1",
+        "pdfkit": "^0.17.2",
+        "telegraf": "^4.16.3"
+    },
+    "devDependencies": {
+        "jest": "^29.7.0",
+        "pm2": "^6.0.14"
+    }
+}

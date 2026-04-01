@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+gui/node_modules/
+
+# Environment files (sensitive)
+.env
+.env.admin
+.env.local
+.env.production
+
+# Database
+data/bot.db
+data/bot.db-shm
+data/bot.db-wal
+data/backups/
+
+# Logs
+logs/
+*.log
+bot.log
+
+# macOS junk
+._*
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# PM2
+.pm2/
+
+# Fonts (large binary files)
+fonts/*.ttf
+fonts/*.otf
+data/data/

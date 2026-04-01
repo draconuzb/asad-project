@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NS-Bot Database</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #1a1a1a; }
+
+  /* Layout */
+  .header { background: #1a73e8; color: white; padding: 12px 24px; display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 100; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .db-name { font-size: 13px; opacity: 0.8; }
+
+  .container { display: flex; height: calc(100vh - 48px); }
+
+  /* Sidebar */
+  .sidebar { width: 220px; background: white; border-right: 1px solid #ddd; overflow-y: auto; flex-shrink: 0; }
+  .sidebar h3 { padding: 16px 16px 8px; font-size: 11px; text-transform: uppercase; color: #666; letter-spacing: 0.5px; }
+  .sidebar .table-item { padding: 8px 16px; cursor: pointer; font-size: 14px; border-left: 3px solid transparent; transition: all 0.15s; }
+  .sidebar .table-item:hover { background: #f0f6ff; }
+  .sidebar .table-item.active { background: #e8f0fe; border-left-color: #1a73e8; color: #1a73e8; font-weight: 500; }
+  .sidebar .table-count { font-size: 11px; color: #999; margin-left: 4px; }
+
+  /* Main content */
+  .main { flex: 1; overflow: auto; display: flex; flex-direction: column; }
+
+  /* Toolbar */
+  .toolbar { padding: 12px 20px; background: white; border-bottom: 1px solid #ddd; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .toolbar .table-title { font-size: 16px; font-weight: 600; margin-right: auto; }
+  .btn { padding: 6px 14px; border: 1px solid #ddd; border-radius: 4px; background: white; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .btn:hover { background: #f5f5f5; }
+  .btn-primary { background: #1a73e8; color: white; border-color: #1a73e8; }
+  .btn-primary:hover { background: #1557b0; }
+  .btn-danger { color: #d93025; border-color: #d93025; }
+  .btn-danger:hover { background: #fce8e6; }
+  .search-box { padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; width: 200px; }
+
+  /* Table */
+  .table-wrap { flex: 1; overflow: auto; padding: 0; }
+  table { border-collapse: collapse; width: 100%; min-width: 600px; }
+  thead { position: sticky; top: 0; z-index: 10; }
+  th { background: #f8f9fa; border: 1px solid #e0e0e0; padding: 8px 12px; font-size: 12px; font-weight: 600; text-align: left; color: #555; text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; }
+  td { border: 1px solid #e0e0e0; padding: 0; font-size: 13px; background: white; position: relative; }
+  td .cell { padding: 6px 10px; min-height: 32px; cursor: text; white-space: pre-wrap; word-break: break-word; max-width: 400px; overflow: hidden; text-overflow: ellipsis; }
+  td .cell:hover { background: #f0f6ff; }
+  td .cell.editing { background: #fff; outline: 2px solid #1a73e8; outline-offset: -2px; padding: 5px 9px; }
+  td .cell.id-cell { color: #999; cursor: default; background: #fafafa; }
+  tr:hover td { background: #f8fbff; }
+  tr:hover td .cell.id-cell { background: #f0f4fa; }
+  tr.selected td { background: #e8f0fe; }
+
+  /* Row checkbox */
+  .row-check { width: 36px; text-align: center; }
+  .row-check input { cursor: pointer; }
+
+  /* Status bar */
+  .statusbar { padding: 6px 20px; background: white; border-top: 1px solid #ddd; font-size: 12px; color: #666; display: flex; gap: 20px; }
+
+  /* SQL Panel */
+  .sql-panel { background: white; border-top: 1px solid #ddd; }
+  .sql-panel .sql-header { padding: 8px 20px; background: #f8f9fa; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .sql-panel .sql-header h3 { font-size: 13px; color: #555; }
+  .sql-body { padding: 12px 20px; display: none; }
+  .sql-body.open { display: block; }
+  .sql-body textarea { width: 100%; height: 80px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; resize: vertical; }
+  .sql-result { margin-top: 10px; max-height: 200px; overflow: auto; font-size: 12px; }
+  .sql-result pre { background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 20px; right: 20px; background: #323232; color: white; padding: 10px 20px; border-radius: 6px; font-size: 13px; z-index: 1000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.error { background: #d93025; }
+
+  /* Add row form */
+  .add-row-form { padding: 12px 20px; background: #fffde7; border-bottom: 1px solid #f0e68c; display: none; }
+  .add-row-form.open { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+  .add-row-form .field { display: flex; flex-direction: column; gap: 2px; }
+  .add-row-form label { font-size: 10px; text-transform: uppercase; color: #666; }
+  .add-row-form input { padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px; font-size: 13px; width: 140px; }
+
+  /* Empty state */
+  .empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: #999; font-size: 15px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>NS-Bot Database</h1>
+  <span class="db-name">SQLite GUI</span>
+</div>
+
+<div class="container">
+  <div class="sidebar">
+    <h3>Tables</h3>
+    <div id="table-list"></div>
+  </div>
+
+  <div class="main">
+    <div class="toolbar" id="toolbar" style="display:none">
+      <span class="table-title" id="table-title"></span>
+      <input type="text" class="search-box" id="search-box" placeholder="Filter rows...">
+      <button class="btn" id="btn-add-row">+ Add Row</button>
+      <button class="btn btn-danger" id="btn-delete-rows">Delete Selected</button>
+      <button class="btn" id="btn-refresh">Refresh</button>
+    </div>
+
+    <div class="add-row-form" id="add-row-form"></div>
+
+    <div class="table-wrap" id="table-wrap">
+      <div class="empty-state">Select a table from the sidebar</div>
+    </div>
+
+    <div class="statusbar" id="statusbar" style="display:none">
+      <span id="row-count"></span>
+      <span id="selected-count"></span>
+    </div>
+
+    <div class="sql-panel">
+      <div class="sql-header" onclick="toggleSQL()">
+        <h3>SQL Console</h3>
+        <span id="sql-toggle">&#9654;</span>
+      </div>
+      <div class="sql-body" id="sql-body">
+        <textarea id="sql-input" placeholder="SELECT * FROM leads LIMIT 10;"></textarea>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn btn-primary" onclick="runSQL()">Run (Ctrl+Enter)</button>
+        </div>
+        <div class="sql-result" id="sql-result"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// State
+let currentTable = null;
+let columns = [];
+let rows = [];
+let selectedRows = new Set();
+let tableCounts = {};
+
+// API helpers
+async function api(url, opts = {}) {
+  opts.headers = { 'Content-Type': 'application/json', ...opts.headers };
+  if (opts.body && typeof opts.body === 'object') opts.body = JSON.stringify(opts.body);
+  const r = await fetch(url, opts);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+function toast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+// Load table list
+async function loadTables() {
+  const tables = await api('/api/tables');
+  const list = document.getElementById('table-list');
+
+  // Get counts for each table
+  for (const t of tables) {
+    try {
+      const data = await api(`/api/tables/${t}/rows`);
+      tableCounts[t] = data.length;
+    } catch { tableCounts[t] = 0; }
+  }
+
+  list.innerHTML = tables.map(t =>
+    `<div class="table-item" data-table="${t}" onclick="selectTable('${t}')">
+      ${t}<span class="table-count">(${tableCounts[t] || 0})</span>
+    </div>`
+  ).join('');
+}
+
+// Select a table
+async function selectTable(name) {
+  currentTable = name;
+  selectedRows.clear();
+
+  // Update sidebar
+  document.querySelectorAll('.table-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.table === name);
+  });
+
+  // Load schema & data
+  columns = await api(`/api/tables/${name}/schema`);
+  rows = await api(`/api/tables/${name}/rows`);
+
+  document.getElementById('toolbar').style.display = 'flex';
+  document.getElementById('statusbar').style.display = 'flex';
+  document.getElementById('table-title').textContent = name;
+  document.getElementById('search-box').value = '';
+  document.getElementById('add-row-form').classList.remove('open');
+
+  renderTable();
+}
+
+// Render the table
+function renderTable(filter = '') {
+  const wrap = document.getElementById('table-wrap');
+  if (!columns.length) {
+    wrap.innerHTML = '<div class="empty-state">Empty table</div>';
+    return;
+  }
+
+  const filterLower = filter.toLowerCase();
+  const filtered = filter
+    ? rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(filterLower)))
+    : rows;
+
+  const colNames = columns.map(c => c.name);
+
+  let html = '<table><thead><tr><th class="row-check"><input type="checkbox" onchange="toggleAll(this)"></th>';
+  colNames.forEach(c => { html += `<th>${c}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  filtered.forEach(row => {
+    const rid = row.rowid;
+    const sel = selectedRows.has(rid) ? ' selected' : '';
+    html += `<tr class="${sel}" data-rowid="${rid}">`;
+    html += `<td class="row-check"><input type="checkbox" ${selectedRows.has(rid) ? 'checked' : ''} onchange="toggleSelect(${rid}, this)"></td>`;
+    colNames.forEach(col => {
+      const val = row[col] ?? '';
+      const isId = col === 'id' || col === 'rowid';
+      html += `<td><div class="cell${isId ? ' id-cell' : ''}" data-col="${col}" data-rowid="${rid}" ${isId ? '' : `onclick="startEdit(this)"`}>${escHtml(String(val))}</div></td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+
+  document.getElementById('row-count').textContent = `${filtered.length} of ${rows.length} rows`;
+  updateSelectedCount();
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Inline editing
+function startEdit(cell) {
+  if (cell.classList.contains('editing')) return;
+  const oldVal = cell.textContent;
+  cell.classList.add('editing');
+  cell.contentEditable = true;
+  cell.focus();
+
+  // Select all text
+  const range = document.createRange();
+  range.selectNodeContents(cell);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  function finish(save) {
+    cell.classList.remove('editing');
+    cell.contentEditable = false;
+    cell.removeEventListener('blur', onBlur);
+    cell.removeEventListener('keydown', onKey);
+
+    if (save && cell.textContent !== oldVal) {
+      saveCell(cell.dataset.rowid, cell.dataset.col, cell.textContent, oldVal);
+    } else if (!save) {
+      cell.textContent = oldVal;
+    }
+  }
+
+  function onBlur() { finish(true); }
+  function onKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+    if (e.key === 'Escape') { finish(false); }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      finish(true);
+      // Move to next cell
+      const td = cell.parentElement;
+      const next = e.shiftKey ? td.previousElementSibling : td.nextElementSibling;
+      if (next) {
+        const nextCell = next.querySelector('.cell:not(.id-cell)');
+        if (nextCell) startEdit(nextCell);
+      }
+    }
+  }
+
+  cell.addEventListener('blur', onBlur);
+  cell.addEventListener('keydown', onKey);
+}
+
+async function saveCell(rowid, col, newVal, oldVal) {
+  try {
+    await api(`/api/tables/${currentTable}/rows/${rowid}`, {
+      method: 'PUT',
+      body: { column: col, value: newVal }
+    });
+    // Update local data
+    const row = rows.find(r => r.rowid == rowid);
+    if (row) row[col] = newVal;
+    toast(`Updated ${col}`);
+  } catch (e) {
+    toast(e.message, true);
+    // Revert
+    const cell = document.querySelector(`[data-rowid="${rowid}"][data-col="${col}"]`);
+    if (cell) cell.textContent = oldVal;
+  }
+}
+
+// Row selection
+function toggleSelect(rowid, checkbox) {
+  if (checkbox.checked) selectedRows.add(rowid);
+  else selectedRows.delete(rowid);
+  checkbox.closest('tr').classList.toggle('selected', checkbox.checked);
+  updateSelectedCount();
+}
+
+function toggleAll(checkbox) {
+  document.querySelectorAll('tbody .row-check input').forEach(cb => {
+    cb.checked = checkbox.checked;
+    const rid = parseInt(cb.closest('tr').dataset.rowid);
+    if (checkbox.checked) selectedRows.add(rid);
+    else selectedRows.delete(rid);
+    cb.closest('tr').classList.toggle('selected', checkbox.checked);
+  });
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  document.getElementById('selected-count').textContent = selectedRows.size ? `${selectedRows.size} selected` : '';
+}
+
+// Delete selected rows
+document.getElementById('btn-delete-rows').addEventListener('click', async () => {
+  if (!selectedRows.size) return toast('No rows selected');
+  if (!confirm(`Delete ${selectedRows.size} row(s)?`)) return;
+
+  try {
+    for (const rid of selectedRows) {
+      await api(`/api/tables/${currentTable}/rows/${rid}`, { method: 'DELETE' });
+    }
+    toast(`Deleted ${selectedRows.size} row(s)`);
+    selectedRows.clear();
+    await selectTable(currentTable);
+    tableCounts[currentTable] = rows.length;
+    document.querySelector(`[data-table="${currentTable}"] .table-count`).textContent = `(${rows.length})`;
+  } catch (e) { toast(e.message, true); }
+});
+
+// Add row
+document.getElementById('btn-add-row').addEventListener('click', () => {
+  const form = document.getElementById('add-row-form');
+  if (form.classList.contains('open')) {
+    form.classList.remove('open');
+    return;
+  }
+  const colNames = columns.filter(c => c.name !== 'id').map(c => c.name);
+  form.innerHTML = colNames.map(c =>
+    `<div class="field"><label>${c}</label><input name="${c}" placeholder="${c}"></div>`
+  ).join('') + `<button class="btn btn-primary" onclick="submitNewRow()">Insert</button>
+  <button class="btn" onclick="document.getElementById('add-row-form').classList.remove('open')">Cancel</button>`;
+  form.classList.add('open');
+});
+
+async function submitNewRow() {
+  const form = document.getElementById('add-row-form');
+  const inputs = form.querySelectorAll('input');
+  const data = {};
+  inputs.forEach(inp => { if (inp.value) data[inp.name] = inp.value; });
+  if (!Object.keys(data).length) return toast('Fill at least one field', true);
+
+  try {
+    await api(`/api/tables/${currentTable}/rows`, { method: 'POST', body: data });
+    toast('Row added');
+    form.classList.remove('open');
+    await selectTable(currentTable);
+    tableCounts[currentTable] = rows.length;
+    document.querySelector(`[data-table="${currentTable}"] .table-count`).textContent = `(${rows.length})`;
+  } catch (e) { toast(e.message, true); }
+}
+
+// Search filter
+document.getElementById('search-box').addEventListener('input', (e) => {
+  renderTable(e.target.value);
+});
+
+// Refresh
+document.getElementById('btn-refresh').addEventListener('click', () => {
+  if (currentTable) selectTable(currentTable);
+});
+
+// SQL Console
+function toggleSQL() {
+  const body = document.getElementById('sql-body');
+  const toggle = document.getElementById('sql-toggle');
+  body.classList.toggle('open');
+  toggle.innerHTML = body.classList.contains('open') ? '&#9660;' : '&#9654;';
+}
+
+async function runSQL() {
+  const query = document.getElementById('sql-input').value.trim();
+  if (!query) return;
+  const result = document.getElementById('sql-result');
+
+  try {
+    const data = await api('/api/sql', { method: 'POST', body: { query } });
+    if (data.type === 'select' && data.rows) {
+      if (!data.rows.length) {
+        result.innerHTML = '<pre>No results</pre>';
+      } else {
+        // Render as mini table
+        const cols = Object.keys(data.rows[0]);
+        let html = '<table style="font-size:12px;border-collapse:collapse;width:100%"><thead><tr>';
+        cols.forEach(c => html += `<th style="background:#f0f0f0;border:1px solid #ddd;padding:4px 8px;text-align:left">${escHtml(c)}</th>`);
+        html += '</tr></thead><tbody>';
+        data.rows.forEach(r => {
+          html += '<tr>';
+          cols.forEach(c => html += `<td style="border:1px solid #ddd;padding:4px 8px">${escHtml(String(r[c] ?? ''))}</td>`);
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+        result.innerHTML = html;
+      }
+    } else {
+      result.innerHTML = `<pre>${data.changes} row(s) affected</pre>`;
+      if (currentTable) selectTable(currentTable);
+    }
+  } catch (e) {
+    result.innerHTML = `<pre style="color:#d93025">${escHtml(e.message)}</pre>`;
+  }
+}
+
+// Ctrl+Enter to run SQL
+document.getElementById('sql-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runSQL(); }
+});
+
+// Init
+loadTables();
+</script>
+</body>
+</html>

@@ -7,6 +7,7 @@ const logger = require('./logger');
 const db = require('./db');
 const { getTashkentDateString, getTashkentNow, getWeekRange, getMonthRange } = require('./utils');
 const { generateDailyReport, generateWeeklyReport, generateWeeklyPdf, generateMonthlyReport, generateMonthlyPdf } = require('./ceo_reports');
+const crmSync = require('./crm-sync');
 
 const LEAD_MONITOR_THRESHOLD = 15;
 
@@ -135,6 +136,18 @@ async function startCronJobs(bot) {
 
         builtInCronTasks.set(key, task);
         logger.info(`⏰ Registered built-in cron: ${key} (${expr})`);
+    }
+
+    // 0. CRM Sync - Every hour at :05 (if configured)
+    if (crmSync.isConfigured()) {
+        registerBuiltInProcess('crm_sync', '5 * * * *', async () => {
+            logger.info('⏰ Running CRM Sync...');
+            const results = await crmSync.syncAll();
+            logger.info('⏰ CRM Sync complete:', JSON.stringify(results));
+        });
+        logger.info('✅ CRM Sync enabled — running every hour');
+    } else {
+        logger.info('ℹ️ CRM Sync disabled — CRM_BASE_URL or CRM_PHONE not set');
     }
 
     // 1. Manager Reminder - Every day at 18:00

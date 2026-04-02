@@ -508,4 +508,12 @@ safeMigration("UPDATE expense_types SET category = 'cat_2' WHERE LOWER(TRIM(cate
 }
 
 
+// ── CRM Sync State ──
+db.exec(`
+CREATE TABLE IF NOT EXISTS crm_sync_state (
+    sync_type TEXT PRIMARY KEY,
+    last_synced_at TEXT NOT NULL
+);
+`);
+
 module.exports = db;

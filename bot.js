@@ -13,7 +13,7 @@ initShutdownHandlers();
 
 // Load scene builder
 const { buildScenes } = require("./scenes");
-const { getTashkentDateString, getTashkentNow, cleanText } = require("./utils");
+const { getTashkentDateString, getTashkentNow, cleanText, escapeMarkdown } = require("./utils");
 const { buildUserManagementScenes } = require('./user_management_scenes');
 const { searchScene } = require('./search_scene');
 // const { cronScene, setBotRef } = require('./cron_scene'); // Removed — cron managed via webapp
@@ -31,8 +31,6 @@ function escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// Markdown escape helper to prevent injection in parse_mode: 'Markdown' messages
-// escapeMarkdown imported from utils.js
 
 
 
@@ -951,7 +949,7 @@ bot.action('moliya_kirim_norasmiy_del', async (ctx) => {
 bot.action('moliya_chiqim_rasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('moliya_chiqim_rasmiy', { financeCategory: 'Rasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('moliya_chiqim_rasmiy', { financeCategory: 'cat_2' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }
@@ -960,7 +958,7 @@ bot.action('moliya_chiqim_rasmiy', async (ctx) => {
 bot.action('moliya_chiqim_norasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('moliya_chiqim_norasmiy', { financeCategory: 'Norasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('moliya_chiqim_norasmiy', { financeCategory: 'cat_1' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }
@@ -970,7 +968,7 @@ bot.action('moliya_chiqim_norasmiy', async (ctx) => {
 bot.action('moliya_chiqim_del_norasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('moliya_chiqim_del', { financeCategory: 'Norasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('moliya_chiqim_del', { financeCategory: 'cat_1' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }
@@ -979,7 +977,7 @@ bot.action('moliya_chiqim_del_norasmiy', async (ctx) => {
 bot.action('moliya_chiqim_del_rasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('moliya_chiqim_del', { financeCategory: 'Rasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('moliya_chiqim_del', { financeCategory: 'cat_2' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }
@@ -989,7 +987,7 @@ bot.action('moliya_chiqim_del_rasmiy', async (ctx) => {
 bot.action('xarajat_turi_qoshish_norasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('xarajat_turi_qoshish', { presetCategory: 'Norasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('xarajat_turi_qoshish', { presetCategory: 'cat_1' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }
@@ -998,7 +996,7 @@ bot.action('xarajat_turi_qoshish_norasmiy', async (ctx) => {
 bot.action('xarajat_turi_qoshish_rasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('xarajat_turi_qoshish', { presetCategory: 'Rasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('xarajat_turi_qoshish', { presetCategory: 'cat_2' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }
@@ -1007,7 +1005,7 @@ bot.action('xarajat_turi_qoshish_rasmiy', async (ctx) => {
 bot.action('xarajat_turi_ochirish_norasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('xarajat_turi_ochirish', { presetCategory: 'Norasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('xarajat_turi_ochirish', { presetCategory: 'cat_1' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }
@@ -1016,7 +1014,7 @@ bot.action('xarajat_turi_ochirish_norasmiy', async (ctx) => {
 bot.action('xarajat_turi_ochirish_rasmiy', async (ctx) => {
     if (!checkSection(ctx, 'moliya')) return;
     await ctx.answerCbQuery().catch(() => { });
-    try { await ctx.scene.enter('xarajat_turi_ochirish', { presetCategory: 'Rasmiy' }); } catch(e) {
+    try { await ctx.scene.enter('xarajat_turi_ochirish', { presetCategory: 'cat_2' }); } catch(e) {
         logger.error('Scene enter failed:', e.message);
         await ctx.reply('Xatolik yuz berdi').catch(() => {});
     }

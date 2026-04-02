@@ -168,7 +168,8 @@ function getUserPerms(tid) {
     const row = db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tid);
     if (!row) return null;
     const role = row.role || 'user';
-    const ceo = role === 'ceo';
+    const isSuper = role === 'super';
+    const ceo = role === 'ceo' || isSuper;
     const manager = role === 'manager';
     const allowed_branches = ceo
         ? db.prepare('SELECT id FROM branches').all().map(b => b.id)
@@ -176,7 +177,8 @@ function getUserPerms(tid) {
     return {
         telegram_id: row.telegram_id, name: row.name, role,
         is_ceo: ceo, is_manager: manager,
-        is_super_ceo: ceo && String(tid) === String(process.env.CEO_TELEGRAM_ID),
+        is_super: isSuper,
+        is_super_ceo: (isSuper || (ceo && String(tid) === String(process.env.CEO_TELEGRAM_ID))),
         allowed_branches,
         sections: {
             leads: ceo || manager || row.sec_lead === 1,
@@ -353,6 +355,27 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
         'Boshqa': null    // everyone sees "Boshqa" problems
     };
 
+
+    // ── Finance Category Helper ──
+    let _finCatCache = null;
+    let _finCatCacheTime = 0;
+    function getFinCats() {
+        if (_finCatCache && Date.now() - _finCatCacheTime < 60000) return _finCatCache;
+        _finCatCache = db.prepare("SELECT key, label, color, sort_order FROM finance_categories ORDER BY sort_order").all();
+        _finCatCacheTime = Date.now();
+        return _finCatCache;
+    }
+    function finCatLabel(key) {
+        const cats = getFinCats();
+        const cat = cats.find(c => c.key === key);
+        return cat ? cat.label : key;
+    }
+    function finCatByLabel(label) {
+        const cats = getFinCats();
+        const cat = cats.find(c => c.label.toLowerCase() === label.toLowerCase());
+        return cat ? cat.key : label;
+    }
+
     // Notify reports users via Telegram
     function notifyReportsUsers(text) {
         try {
@@ -392,7 +415,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
 
     // ════════════════════ READ ENDPOINTS ═════════════════════
 
-    app.get(['/', '/api', '/twa/api', '/twa/api/'], (req, res) => {
+    app.get(['/', '/api', '/twa/api', '/twa/api/'], async (req, res) => {
         const endpoint = req.query.endpoint || 'dashboard';
         const today = todayYmd();
         const mStart = monthStartYmd();
@@ -420,6 +443,10 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
             case 'subjects':
                 if (!req.perms) return res.status(403).json({ error: 'Avtorizatsiya talab qilinadi' });
                 return res.json(db.prepare('SELECT id, name FROM subjects ORDER BY name').all());
+
+            case 'finance_categories':
+                if (!req.perms) return res.status(403).json({ error: 'Avtorizatsiya talab qilinadi' });
+                return res.json(getFinCats());
 
             case 'expense_types': {
                 if (!req.perms) return res.status(403).json({ error: 'Avtorizatsiya talab qilinadi' });
@@ -523,7 +550,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                     };
                 }
                 if (s.finance) {
-                    const finRows = db.prepare(`SELECT month, COALESCE(SUM(CASE WHEN category='Rasmiy' THEN income ELSE 0 END),0) as rasmiy_tushum, COALESCE(SUM(CASE WHEN category='Norasmiy' THEN income ELSE 0 END),0) as norasmiy_tushum, COALESCE(SUM(CASE WHEN category='Rasmiy' THEN expense ELSE 0 END),0) as rasmiy_xarajat, COALESCE(SUM(CASE WHEN category='Norasmiy' THEN expense ELSE 0 END),0) as norasmiy_xarajat, COALESCE(SUM(income),0) as total_income, COALESCE(SUM(expense),0) as total_expense FROM finance WHERE month != '' AND month != '-'` + monthFilter + bs.sql + ` GROUP BY month`).all(...mfParams, ...bs.params);
+                    const finRows = db.prepare(`SELECT month, COALESCE(SUM(CASE WHEN category='cat_2' THEN income ELSE 0 END),0) as cat_2_tushum, COALESCE(SUM(CASE WHEN category='cat_1' THEN income ELSE 0 END),0) as cat_1_tushum, COALESCE(SUM(CASE WHEN category='cat_2' THEN expense ELSE 0 END),0) as cat_2_xarajat, COALESCE(SUM(CASE WHEN category='cat_1' THEN expense ELSE 0 END),0) as cat_1_xarajat, COALESCE(SUM(income),0) as total_income, COALESCE(SUM(expense),0) as total_expense FROM finance WHERE month != '' AND month != '-'` + monthFilter + bs.sql + ` GROUP BY month`).all(...mfParams, ...bs.params);
                     o.finance = { byMonth: sortByUzMonth(finRows) };
                 }
                 if (s.attendance) {
@@ -587,7 +614,8 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                     }
                 }
 
-                o.filterMonths = filterMonths; return res.json({ timestamp: new Date().toISOString(), today, currentMonth: curMonth, permissions: req.perms, overview: o });
+                o.filterMonths = filterMonths;
+                o.finCategories = getFinCats(); return res.json({ timestamp: new Date().toISOString(), today, currentMonth: curMonth, permissions: req.perms, overview: o });
             }
 
             case 'leads':
@@ -603,7 +631,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const currentBySubject = allLeads.map(r => ({ subject: r.subject, total: Math.max(0, (r.total || 0) - (rejMap[r.subject] || 0) - (enrollMap[r.subject] || 0)) })).filter(r => r.total > 0).sort((a, b) => b.total - a.total);
                 const currentTotal = currentBySubject.reduce((s, r) => s + r.total, 0);
                 return res.json({
-                    from, to, branch_id: branchId,
+                    from, to, branch_id: branchId, finCategories: getFinCats(),
                     rows: db.prepare("SELECT l.*, b.name as branch_name FROM leads l LEFT JOIN branches b ON l.branch_id = b.id WHERE l.date_ymd >= ? AND l.date_ymd <= ?" + bs.sql.replace(/branch_id/g, 'l.branch_id') + " ORDER BY l.id DESC").all(from, to, ...bs.params),
                     bySubject: db.prepare("SELECT subject, SUM(count) as total FROM leads WHERE date_ymd >= ? AND date_ymd <= ?" + bs.sql + " GROUP BY subject HAVING total > 0 ORDER BY total DESC").all(from, to, ...bs.params),
                     rejBySubject, rejTotal, currentBySubject, currentTotal,
@@ -721,14 +749,14 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const repFinByCat = db.prepare("SELECT category, COALESCE(SUM(income),0) as income, COALESCE(SUM(expense),0) as expense FROM finance WHERE date_ymd >= ? AND date_ymd <= ?" + bs.sql + " GROUP BY category").all(rFrom, rTo, ...bs.params);
                 const repExpByType = db.prepare("SELECT expense_type as type, COALESCE(SUM(expense),0) as amount, category FROM finance WHERE date_ymd >= ? AND date_ymd <= ? AND expense > 0 AND expense_type != ''" + bs.sql + " GROUP BY expense_type, category ORDER BY amount DESC").all(rFrom, rTo, ...bs.params);
                 // All registered expense types (show as 0 if not used in this period)
-                const allExpTypesNor = db.prepare("SELECT name FROM expense_types WHERE category = 'Norasmiy' ORDER BY id").all().map(r => r.name);
-                const allExpTypesRas = db.prepare("SELECT name FROM expense_types WHERE category = 'Rasmiy' ORDER BY id").all().map(r => r.name);
-                const norMap = {}; repExpByType.filter(e => e.category === 'Norasmiy').forEach(e => { norMap[e.type] = e.amount; });
-                const rasMap = {}; repExpByType.filter(e => e.category === 'Rasmiy').forEach(e => { rasMap[e.type] = e.amount; });
-                const expensesNorasmiy = allExpTypesNor.map(name => ({ name, amount: norMap[name] || 0 }));
-                const expensesRasmiy = allExpTypesRas.map(name => ({ name, amount: rasMap[name] || 0 }));
-                repExpByType.filter(e => e.category === 'Norasmiy').forEach(e => { if (!allExpTypesNor.includes(e.type)) expensesNorasmiy.push({ name: e.type, amount: e.amount }); });
-                repExpByType.filter(e => e.category === 'Rasmiy').forEach(e => { if (!allExpTypesRas.includes(e.type)) expensesRasmiy.push({ name: e.type, amount: e.amount }); });
+                const allExpTypesCat1 = db.prepare("SELECT name FROM expense_types WHERE category = 'cat_1' ORDER BY id").all().map(r => r.name);
+                const allExpTypesCat2 = db.prepare("SELECT name FROM expense_types WHERE category = 'cat_2' ORDER BY id").all().map(r => r.name);
+                const cat1Map = {}; repExpByType.filter(e => e.category === 'cat_1').forEach(e => { cat1Map[e.type] = e.amount; });
+                const cat2Map = {}; repExpByType.filter(e => e.category === 'cat_2').forEach(e => { cat2Map[e.type] = e.amount; });
+                const expensesCat1 = allExpTypesCat1.map(name => ({ name, amount: cat1Map[name] || 0 }));
+                const expensesCat2 = allExpTypesCat2.map(name => ({ name, amount: cat2Map[name] || 0 }));
+                repExpByType.filter(e => e.category === 'cat_1').forEach(e => { if (!allExpTypesCat1.includes(e.type)) expensesCat1.push({ name: e.type, amount: e.amount }); });
+                repExpByType.filter(e => e.category === 'cat_2').forEach(e => { if (!allExpTypesCat2.includes(e.type)) expensesCat2.push({ name: e.type, amount: e.amount }); });
                 const repAtt = db.prepare("SELECT COALESCE(SUM(expected),0) as expected, COALESCE(SUM(attended),0) as attended FROM attendance WHERE date_ymd >= ? AND date_ymd <= ?" + bs.sql).get(rFrom, rTo, ...bs.params);
                 const repProblems = db.prepare("SELECT branch, type, issue, timestamp FROM problems WHERE date_ymd >= ? AND date_ymd <= ?" + bs.sql + " ORDER BY id DESC").all(rFrom, rTo, ...bs.params);
                 // Use historical rooms data for daily/weekly/monthly reports; current snapshot for 'umumiy'
@@ -759,11 +787,11 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                     });
                 }
                 return res.json({
-                    type: req.query.type || 'daily', from: rFrom, to: rTo, byBranch: repByBranch,
+                    type: req.query.type || 'daily', from: rFrom, to: rTo, byBranch: repByBranch, finCategories: getFinCats(),
                     leads: { bySubject: repLeads, total: repLeads.reduce((s, r) => s + r.total, 0) },
                     rejections: { bySubject: repRej, total: repRej.reduce((s, r) => s + r.total, 0) },
                     debtors: { total_count: repDebtors.cnt, total_amount: repDebtors.amt, byMonth: repDebtorsByMonth },
-                    finance: { income: repFin.income, expense: repFin.expense, byCategory: repFinByCat, expensesByType: repExpByType, expensesNorasmiy, expensesRasmiy },
+                    finance: { income: repFin.income, expense: repFin.expense, byCategory: repFinByCat, expensesByType: repExpByType, expensesCat1, expensesCat2 },
                     attendance: { expected: repAtt.expected, attended: repAtt.attended },
                     problems: repProblems,
                     rooms: { total: repRooms.length, potential: repPotential, list: repRooms },
@@ -781,7 +809,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (req.perms.is_manager) {
                     const myBranches = req.perms.allowed_branches;
                     users = users.filter(u => {
-                        if (u.role === 'ceo' || u.role === 'manager') return false;
+                        if (u.role === 'super' || u.role === 'ceo' || u.role === 'manager') return false;
                         return u.assigned_branches.some(b => myBranches.includes(b.id));
                     });
                 }
@@ -1518,8 +1546,8 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const { generateSectionPdf } = require('./pdf_generator');
                 const fs = require('fs');
                 const pdfData = {
-                    summary: db.prepare('SELECT SUM(count) as total_count, SUM(amount) as total_amount FROM debtors').get(),
-                    byMonth: db.prepare("SELECT month, SUM(count) as total_count, SUM(amount) as total_amount FROM debtors WHERE month != '' GROUP BY month").all(),
+                    summary: db.prepare('SELECT SUM(count) as total_count, SUM(amount) as total_amount FROM debtors' + (branchId ? ' WHERE branch_id = ?' : '')).get(...(branchId ? [branchId] : [])),
+                    byMonth: db.prepare("SELECT month, SUM(count) as total_count, SUM(amount) as total_amount FROM debtors WHERE month != ''" + (branchId ? ' AND branch_id = ?' : '') + ' GROUP BY month').all(...(branchId ? [branchId] : [])),
                 };
                 const pdfPath = '/tmp/qarzdorlar_' + require('crypto').randomBytes(8).toString('hex') + '.pdf';
                 generateSectionPdf('debtors', pdfData, pdfPath, 'Qarzdorlar hisoboti').then(() => {
@@ -2023,7 +2051,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const category = req.query.category || '';
                 let sql = 'SELECT * FROM hr_staff WHERE status = ?';
                 const params = [status];
-                if (search) { sql += " AND name LIKE ? ESCAPE '\\'"; params.push('%' + search.replace(/[%_\\]/g, '\\if (search) { sql += " AND name LIKE ?"; params.push('%' + search + '%'); }') + '%'); }
+                if (search) { sql += " AND name LIKE ?"; params.push('%' + search.replace(/[%_]/g, '') + '%'); }
                 if (position) { sql += ' AND position = ?'; params.push(position); }
                 if (category) { sql += ' AND category = ?'; params.push(category); }
                 if (req.query.subject !== undefined) { sql += ' AND subject = ?'; params.push(req.query.subject); }
@@ -2138,7 +2166,12 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
             case 'hr_stats': {
                 if (!requirePerm(req, res, 'hr')) return;
                 const bs = branchScope(req, branchId);
-                const total = db.prepare("SELECT COUNT(*) as c FROM hr_staff WHERE status = 'active'" + bs.sql.replace(/branch_id/g, 'branch_id')).get(...bs.params);
+                const realTotal = db.prepare("SELECT COUNT(*) as c FROM hr_staff WHERE status = 'active'").get().c;
+                // Virtual bot users (same as hr_analytics)
+                const _vuStats = db.prepare("SELECT telegram_id, name, role FROM users WHERE role != 'ceo'").all();
+                const _anStats = new Set(db.prepare("SELECT name FROM hr_staff WHERE status = 'active' AND category = 'admin'").all().map(r => r.name));
+                const _vcStats = _vuStats.filter(u => !_anStats.has(u.name)).length;
+                const total = realTotal + _vcStats;
                 // For branch-scoped: use hr_staff_branches join
                 
                 const inactiveCount = db.prepare("SELECT COUNT(*) as c FROM hr_staff WHERE status = 'inactive'").get().c;
@@ -2188,6 +2221,43 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const bySub = db.prepare('SELECT subject, SUM(count) as total FROM lead_enrolled WHERE date_ymd >= ? AND date_ymd <= ?' + bs.sql + ' GROUP BY subject ORDER BY total DESC').all(from, to, ...bs.params);
                 return res.json({ rows, bySubject: bySub, total: bySub.reduce((s,r) => s + r.total, 0) }); }
             }
+
+            case 'ai_status':
+                return res.json({ available: require('./ai').isAvailable() });
+
+            case 'ai_analyze': {
+                if (!req.perms.is_ceo && !req.perms.is_super) return res.status(403).json({ error: 'Faqat CEO/Super' });
+                const ai = require('./ai');
+                if (!ai.isAvailable()) return res.status(503).json({ error: 'AI xizmati sozlanmagan' });
+                const bs = branchScope(req, branchId);
+                const mStart = monthStartYmd();
+                const tdy = todayYmd();
+                const data = {
+                    leads: db.prepare('SELECT COALESCE(SUM(count),0) as v FROM leads WHERE date_ymd >= ?' + bs.sql).get(mStart, ...bs.params).v,
+                    rejections: db.prepare('SELECT COALESCE(SUM(count),0) as v FROM rejections WHERE date_ymd >= ?' + bs.sql).get(mStart, ...bs.params).v,
+                    income: db.prepare('SELECT COALESCE(SUM(income),0) as v FROM finance WHERE date_ymd >= ?' + bs.sql).get(mStart, ...bs.params).v,
+                    expense: db.prepare('SELECT COALESCE(SUM(expense),0) as v FROM finance WHERE date_ymd >= ?' + bs.sql).get(mStart, ...bs.params).v,
+                    debtors: db.prepare('SELECT COALESCE(SUM(count),0) as cnt, COALESCE(SUM(amount),0) as amt FROM debtors WHERE 1=1' + bs.sql).get(...bs.params),
+                    attendance: db.prepare('SELECT COALESCE(SUM(expected),0) as exp, COALESCE(SUM(attended),0) as att FROM attendance WHERE date_ymd >= ?' + bs.sql).get(mStart, ...bs.params),
+                    problems: db.prepare("SELECT COUNT(*) as c FROM problems WHERE status != 'solved'" + bs.sql).get(...bs.params).c,
+                    leadsBySubject: db.prepare('SELECT subject, SUM(count) as total FROM leads WHERE date_ymd >= ?' + bs.sql + ' GROUP BY subject ORDER BY total DESC LIMIT 10').all(mStart, ...bs.params),
+                    expensesByType: db.prepare("SELECT expense_type as type, SUM(expense) as amount FROM finance WHERE date_ymd >= ? AND expense > 0 AND expense_type != ''" + bs.sql + ' GROUP BY expense_type ORDER BY amount DESC').all(mStart, ...bs.params),
+                };
+                const summary = 'Oylik ma\'lumotlar:\n' +
+                    'Leadlar: ' + data.leads + ' ta\n' +
+                    'Rad etilganlar: ' + data.rejections + ' ta\n' +
+                    'Kirim: ' + data.income + ' so\'m\n' +
+                    'Chiqim: ' + data.expense + ' so\'m\n' +
+                    'Foyda: ' + (data.income - data.expense) + ' so\'m\n' +
+                    'Qarzdorlar: ' + data.debtors.cnt + ' ta (' + data.debtors.amt + ' so\'m)\n' +
+                    'Davomat: ' + (data.attendance.exp > 0 ? Math.round(data.attendance.att / data.attendance.exp * 100) : 0) + '%\n' +
+                    'Ochiq muammolar: ' + data.problems + ' ta\n' +
+                    'Fan bo\'yicha leadlar: ' + data.leadsBySubject.map(r => r.subject + ': ' + r.total).join(', ') + '\n' +
+                    'Xarajat turlari: ' + data.expensesByType.map(r => r.type + ': ' + r.amount).join(', ');
+                const analysis = await ai.analyzeReport(summary, 'daily', req.perms.lang || 'uz');
+                return res.json({ analysis: analysis || 'AI tahlil yaratib bo\'lmadi', data });
+            }
+
 
             case 'hr_analytics': {
                 if (!requirePerm(req, res, 'hr')) return;
@@ -2349,8 +2419,6 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (!mo || cnt < 1 || amt < 1) return res.status(400).json({ error: 'Oy, son va summa kiriting' });
                 const ts = nowTs();
                 const result = db.transaction(() => {
-                    const bfq = bid ? ' AND branch_id = ?' : '';
-                    const bfp = bid ? [mo, tid, bid] : [mo, tid];
                     const bfqG = bid ? ' AND branch_id = ?' : '';
                     const bfpG = bid ? [mo, bid] : [mo];
                     const balC = db.prepare("SELECT COALESCE(SUM(count),0) as bal FROM debtors WHERE month=?" + bfqG).get(...bfpG);
@@ -2377,9 +2445,9 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (amt < 0) return res.status(400).json({ error: 'Manfiy qiymat kiritish mumkin emas' });
                 if (!mo || amt < 1) return res.status(400).json({ error: 'Oy va summa kiriting' });
                 const ts = nowTs();
-                const fioResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, amt, mo, amt, ks, '', 'Rasmiy', cmt, tid, ts, today, bid);
-                logAudit(req, 'add', 'finance', {type: 'rasmiy_kirim', amount: amt, month: mo, branch_id: bid}, fioResult.lastInsertRowid);
-                return res.json({ ok: true, message: 'Rasmiy kirim saqlandi' });
+                const fioResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, amt, mo, amt, ks, '', 'cat_2', cmt, tid, ts, today, bid);
+                logAudit(req, 'add', 'finance', {type: 'cat_2_kirim', amount: amt, month: mo, branch_id: bid}, fioResult.lastInsertRowid);
+                return res.json({ ok: true, message: 'Kirim saqlandi' });
             }
 
             case 'finance_income_unofficial': {
@@ -2390,9 +2458,9 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (ka < 0) return res.status(400).json({ error: 'Manfiy qiymat kiritish mumkin emas' });
                 if (!mo || ka < 1) return res.status(400).json({ error: 'Oy va summa kiriting' });
                 const ts = nowTs();
-                const fiuResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, ka, mo, ka, ks, '', 'Norasmiy', cmt, tid, ts, today, bid);
-                logAudit(req, 'add', 'finance', {type: 'norasmiy_kirim', amount: ka, month: mo, branch_id: bid}, fiuResult.lastInsertRowid);
-                return res.json({ ok: true, message: 'Norasmiy kirim saqlandi' });
+                const fiuResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, ka, mo, ka, ks, '', 'cat_1', cmt, tid, ts, today, bid);
+                logAudit(req, 'add', 'finance', {type: 'cat_1_kirim', amount: ka, month: mo, branch_id: bid}, fiuResult.lastInsertRowid);
+                return res.json({ ok: true, message: 'Kirim saqlandi' });
             }
 
             case 'finance_income_unofficial_deduct': {
@@ -2404,17 +2472,17 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const ts = nowTs();
                 const deductResult = db.transaction(() => {
                     // Check current debtor balance for this month/manager before deducting
-                    const debtorBal = db.prepare('SELECT COALESCE(SUM(amount),0) as bal FROM debtors WHERE month = ?').get(mo);
+                    const debtorBal = db.prepare('SELECT COALESCE(SUM(amount),0) as bal FROM debtors WHERE month = ?' + (bid ? ' AND branch_id = ?' : '')).get(...(bid ? [mo, bid] : [mo]));
                     const currentBalance = debtorBal.bal;
                     if (currentBalance <= 0) return { skipped: true };
                     // Cap deduction at the current balance to prevent negative debtor balance
                     const cappedAmount = Math.min(ka, currentBalance);
                     const cappedStudents = cappedAmount < ka ? Math.round(ks * cappedAmount / ka) : ks;
                     // Create finance income record so books balance
-                    db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, cappedAmount, mo, cappedAmount, cappedStudents, '', 'Norasmiy', cmt, tid, ts, today, bid);
+                    db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, cappedAmount, mo, cappedAmount, cappedStudents, '', 'cat_1', cmt, tid, ts, today, bid);
                     // Reduce debtor balance (capped so it cannot go negative)
                     db.prepare('INSERT INTO debtors (timestamp, count, amount, month, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(ts, -cappedStudents, -cappedAmount, mo, tid, ts, today, bid);
-                    db.prepare("INSERT INTO qarzdorlar_log (month, change_amount, type, note, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 'norasmiy_deduction', 'TWA: Norasmiy kirim', ?, ?, ?, ?)").run(mo, -cappedAmount, tid, ts, today, bid);
+                    db.prepare("INSERT INTO qarzdorlar_log (month, change_amount, type, note, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 'norasmiy_deduction', 'TWA: Kirim ayirish', ?, ?, ?, ?)").run(mo, -cappedAmount, tid, ts, today, bid);
                     return { ok: true, cappedAmount };
                 })();
                 if (deductResult.skipped) {
@@ -2433,16 +2501,16 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (!mo || amt < 1) return res.status(400).json({ error: 'Oy va summa kiriting' });
                 const ts = nowTs();
                 const fiocTxn = db.transaction(() => {
-                    const rasmiyBalance = db.prepare("SELECT COALESCE(SUM(income),0) as total FROM finance WHERE month = ? AND category = 'Rasmiy'" + (bid ? ' AND branch_id = ?' : '')).get(...(bid ? [mo, bid] : [mo]));
+                    const rasmiyBalance = db.prepare("SELECT COALESCE(SUM(income),0) as total FROM finance WHERE month = ? AND category = 'cat_2'" + (bid ? ' AND branch_id = ?' : '')).get(...(bid ? [mo, bid] : [mo]));
                     if (rasmiyBalance.total < amt) return { error: 'Bekor qilish uchun yetarli kirim mavjud emas' };
-                    const r = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, -amt, mo, -amt, ks > 0 ? -ks : 0, '', 'Rasmiy', cmt, tid, ts, today, bid);
+                    const r = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, -amt, mo, -amt, ks > 0 ? -ks : 0, '', 'cat_2', cmt, tid, ts, today, bid);
                     return { ok: true, id: r.lastInsertRowid };
                 });
                 const fiocResult = fiocTxn();
                 if (fiocResult.error) return res.status(400).json({ error: fiocResult.error });
-                logAudit(req, 'cancel', 'finance', {type: 'rasmiy_kirim_bekor', amount: amt, month: mo, branch_id: bid}, fiocResult.id);
-                notifyCEO('\ud83d\udeab <b>Rasmiy kirim bekor</b>\n\ud83d\udc64 ' + escTg(req.perms?.name) + '\n\ud83d\udcb0 ' + amt + ' so\'m\n\ud83d\udcc5 ' + escTg(mo));
-                return res.json({ ok: true, message: 'Rasmiy kirim bekor qilindi' });
+                logAudit(req, 'cancel', 'finance', {type: 'cat_2_kirim_bekor', amount: amt, month: mo, branch_id: bid}, fiocResult.id);
+                notifyCEO('\ud83d\udeab <b>Kirim bekor</b>\n\ud83d\udc64 ' + escTg(req.perms?.name) + '\n\ud83d\udcb0 ' + amt + ' so\'m\n\ud83d\udcc5 ' + escTg(mo));
+                return res.json({ ok: true, message: 'Kirim bekor qilindi' });
             }
 
             case 'finance_income_unofficial_cancel': {
@@ -2458,18 +2526,18 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 // the chance of reversing the wrong entry, but this is not a guarantee if multiple
                 // deductions of the same amount exist.
                 const txn = db.transaction(() => {
-                    db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, -amt, mo, -ka, -ks, '', 'Norasmiy', 'Bekor qilish', tid, ts, today, bid);
+                    db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, -amt, mo, -ka, -ks, '', 'cat_1', 'Bekor qilish', tid, ts, today, bid);
                     const deduction = db.prepare("SELECT id, ABS(change_amount) as amt FROM qarzdorlar_log WHERE month = ? AND type = 'norasmiy_deduction' AND manager_id = ? AND ABS(change_amount) = ? AND note NOT LIKE '%[reversed]%' ORDER BY id DESC LIMIT 1").get(mo, req.perms.telegram_id, amt);
                     if (deduction) {
                         db.prepare('INSERT INTO debtors (timestamp, count, amount, month, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(ts, ks, deduction.amt, mo, tid, ts, today, bid);
-                        db.prepare("INSERT INTO qarzdorlar_log (month, change_amount, type, note, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 'norasmiy_reversal', 'TWA: Norasmiy bekor', ?, ?, ?, ?)").run(mo, deduction.amt, tid, ts, today, bid);
+                        db.prepare("INSERT INTO qarzdorlar_log (month, change_amount, type, note, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 'norasmiy_reversal', 'TWA: Kirim bekor', ?, ?, ?, ?)").run(mo, deduction.amt, tid, ts, today, bid);
                         db.prepare("UPDATE qarzdorlar_log SET note = note || ' [reversed]' WHERE id = ?").run(deduction.id);
                     }
                 });
                 txn();
-                notifyCEO('\ud83d\udeab <b>Norasmiy kirim bekor</b>\n\ud83d\udc64 ' + escTg(req.perms?.name) + '\n\ud83d\udcb0 ' + amt + ' so\'m\n\ud83d\udcc5 ' + escTg(mo));
-                logAudit(req, 'cancel', 'finance', {type: 'norasmiy_kirim_bekor', amount: amt, month: mo, branch_id: bid}, '');
-                return res.json({ ok: true, message: 'Norasmiy kirim bekor qilindi' });
+                notifyCEO('\ud83d\udeab <b>Kirim bekor</b>\n\ud83d\udc64 ' + escTg(req.perms?.name) + '\n\ud83d\udcb0 ' + amt + ' so\'m\n\ud83d\udcc5 ' + escTg(mo));
+                logAudit(req, 'cancel', 'finance', {type: 'cat_1_kirim_bekor', amount: amt, month: mo, branch_id: bid}, '');
+                return res.json({ ok: true, message: 'Kirim bekor qilindi' });
             }
 
             case 'finance_expense_official': {
@@ -2480,9 +2548,9 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (amt < 0) return res.status(400).json({ error: 'Manfiy qiymat kiritish mumkin emas' });
                 if (!mo || amt < 1) return res.status(400).json({ error: 'Oy va summa kiriting' });
                 const ts = nowTs();
-                const feoResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)').run(ts, amt, mo, et, 'Rasmiy', cmt, tid, ts, today, bid);
+                const feoResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)').run(ts, amt, mo, et, 'cat_2', cmt, tid, ts, today, bid);
                 logAudit(req, 'add', 'finance', {type: 'rasmiy_chiqim', amount: amt, expense_type: et, month: mo, branch_id: bid}, feoResult.lastInsertRowid);
-                return res.json({ ok: true, message: 'Rasmiy chiqim saqlandi' });
+                return res.json({ ok: true, message: 'Chiqim saqlandi' });
             }
 
             case 'finance_expense_unofficial': {
@@ -2493,9 +2561,9 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (amt < 0) return res.status(400).json({ error: 'Manfiy qiymat kiritish mumkin emas' });
                 if (!mo || amt < 1) return res.status(400).json({ error: 'Oy va summa kiriting' });
                 const ts = nowTs();
-                const feuResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)').run(ts, amt, mo, et, 'Norasmiy', cmt, tid, ts, today, bid);
+                const feuResult = db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, 0, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?)').run(ts, amt, mo, et, 'cat_1', cmt, tid, ts, today, bid);
                 logAudit(req, 'add', 'finance', {type: 'norasmiy_chiqim', amount: amt, expense_type: et, month: mo, branch_id: bid}, feuResult.lastInsertRowid);
-                return res.json({ ok: true, message: 'Norasmiy chiqim saqlandi' });
+                return res.json({ ok: true, message: 'Chiqim saqlandi' });
             }
 
             case 'finance_expense_cancel': {
@@ -2504,7 +2572,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const bid = resolveBranchId(req, res, safeInt(body.branch_id));
                 if (bid === null) return;
                 if (!mo || amt < 1) return res.status(400).json({ error: 'Oy va summa kiriting' });
-                if (!cat) return res.status(400).json({ error: 'Toifa (Rasmiy/Norasmiy) tanlang' });
+                if (!cat || !['cat_1','cat_2'].includes(cat)) return res.status(400).json({ error: 'Toifani tanlang' });
                 const ts = nowTs();
                 const fecTxn = db.transaction(() => {
                     const expBalance = db.prepare("SELECT COALESCE(SUM(expense),0) as total FROM finance WHERE month = ? AND category = ?" + (bid ? ' AND branch_id = ?' : '')).get(...(bid ? [mo, cat, bid] : [mo, cat]));
@@ -2709,7 +2777,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                             ? db.prepare('SELECT income, expense, category, month FROM finance WHERE id = ?').get(id)
                             : db.prepare('SELECT income, expense, category, month FROM finance WHERE id = ? AND manager_id = ?').get(id, req.perms.telegram_id);
                         // Block editing norasmiy income that has linked deduction records
-                        if ((orig.income || 0) > 0 && orig.category === 'Norasmiy') {
+                        if ((orig.income || 0) > 0 && orig.category === 'cat_1') {
                             const linked = db.prepare("SELECT id FROM qarzdorlar_log WHERE month = ? AND type = 'norasmiy_deduction' AND ABS(change_amount) = ? AND note NOT LIKE '%[reversed]%' LIMIT 1").get(orig.month, Math.abs(orig.income));
                             if (linked) return { error: 'Bu kirimga bog\'liq qarzdor ayirmasi mavjud. Avval bekor qiling, keyin qayta kiriting.', status: 400 };
                         }
@@ -2988,6 +3056,9 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                     newRole = 'user';
                 }
                 // Only CEO can create CEO/manager roles
+                if (newRole === 'super' && !req.perms.is_super) {
+                    return res.status(403).json({ error: 'Super admin faqat super admin tomonidan yaratiladi' });
+                }
                 if ((newRole === 'ceo' || newRole === 'manager') && !req.perms.is_ceo) {
                     return res.status(403).json({ error: "Faqat CEO rol berishi mumkin" });
                 }
@@ -3031,6 +3102,9 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 const targetUser = db.prepare('SELECT role FROM users WHERE telegram_id = ?').get(utid);
                 if (!targetUser) return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
                 // Manager cannot edit CEO or other managers
+                if (targetUser.role === 'super') {
+                    return res.status(403).json({ error: 'Super admin tahrirlab bo\'lmaydi' });
+                }
                 if (req.perms.is_manager && (targetUser.role === 'ceo' || targetUser.role === 'manager')) {
                     return res.status(403).json({ error: "Bu foydalanuvchini tahrirlash huquqingiz yo'q" });
                 }
@@ -3045,13 +3119,19 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (req.perms.is_manager) newRole = 'user';
                 // Only CEO can set CEO/manager roles
                 if ((newRole === 'ceo' || newRole === 'manager') && !req.perms.is_ceo) newRole = 'user';
+                // Only super can assign super role
+                if (newRole === 'super' && !req.perms.is_super) newRole = targetUser.role || 'user';
+                // Only super can assign super role
+                if (newRole === 'super' && !req.perms.is_super) newRole = targetUser.role || 'user';
+                // Super can set any role including CEO
+                if (req.perms.is_super && (newRole === 'ceo' || newRole === 'super')) { /* allowed */ }
                 // Guard: prevent removing last CEO
                 if (targetUser.role === 'ceo' && newRole !== 'ceo') {
                     const ceoCount = db.prepare("SELECT COUNT(*) as cnt FROM users WHERE role = 'ceo'").get();
                     if (ceoCount.cnt <= 1) return res.status(400).json({ error: 'Oxirgi CEO rolini olib bo\'lmaydi' });
                 }
                 // Max 2 CEO accounts allowed
-                if (newRole === 'ceo' && targetUser.role !== 'ceo') {
+                if (newRole === 'ceo' && targetUser.role !== 'ceo' && !req.perms.is_super) {
                     const ceoCount = db.prepare("SELECT COUNT(*) as cnt FROM users WHERE role = 'ceo'").get();
                     if (ceoCount.cnt >= 2) return res.status(400).json({ error: "Maksimal 2 ta CEO bo'lishi mumkin" });
                 }
@@ -3102,7 +3182,8 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                 if (!utid) return res.status(400).json({ error: 'Telegram ID kerak' });
                 const target = db.prepare('SELECT role FROM users WHERE telegram_id = ?').get(utid);
                 if (!target) return res.status(404).json({ error: 'Foydalanuvchi topilmadi' });
-                if (target.role === 'ceo') return res.status(400).json({ error: "CEO ni o'chirib bo'lmaydi" });
+                if (target.role === 'super') return res.status(403).json({ error: "Super admin o'chirib bo'lmaydi" });
+                if (target.role === 'ceo' && !req.perms.is_super) return res.status(400).json({ error: "CEO ni o'chirib bo'lmaydi" });
                 // Manager cannot delete other managers
                 if (req.perms.is_manager && target.role === 'manager') {
                     logAudit(req, 'failed_delete', 'users', {reason: 'Manager cannot delete manager', target_id: utid}, '');
@@ -3257,6 +3338,17 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
             }
 
             // ─── Branch CRUD ─────────────────────────────────────
+            case 'finance_category_update': {
+                if (!req.perms.is_ceo && !req.perms.is_super) return res.status(403).json({ error: 'Faqat CEO/Super admin' });
+                const { key, label, color } = body;
+                if (!key || !label) return res.status(400).json({ error: 'key va label kerak' });
+                const fcResult = db.prepare('UPDATE finance_categories SET label = ?, color = ? WHERE key = ?').run(label.trim(), color || '#06b6d4', key);
+                if (fcResult.changes === 0) return res.status(404).json({ error: 'Toifa topilmadi' });
+                _finCatCache = null; // bust cache
+                logAudit(req, 'update', 'finance_categories', { key, label, color }, '');
+                return res.json({ ok: true });
+            }
+
             case 'branch_add': {
                 if (!req.perms || !req.perms.is_ceo) return res.status(403).json({ error: "Ruxsat yo'q" });
                 const name = (body.name || '').trim();
@@ -3436,7 +3528,7 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
     });
 
     // ─── DB Admin (CEO or password) ─────────────────────────
-    const DB_ADMIN_KEY = 'nsbot2026db';
+    // DB_ADMIN_KEY removed — auth is via is_super_ceo only
     function dbAuth(req, res) {
         if (req.perms?.is_super_ceo) return true;
         res.status(403).json({ error: 'Access denied' });

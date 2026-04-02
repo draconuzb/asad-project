@@ -958,7 +958,7 @@ function buildScenes(SECTIONS) {
                 return;
             }
             await ctx.reply('Qaysi toifaga tur qo\'shmoqchisiz?', Markup.inlineKeyboard([
-                [Markup.button.callback('Norasmiy', 'cat_Norasmiy'), Markup.button.callback('Rasmiy', 'cat_Rasmiy')],
+                [Markup.button.callback('cat_1', 'cat_Norasmiy'), Markup.button.callback('cat_2', 'cat_Rasmiy')],
                 [Markup.button.callback(t(lang, 'scene_cancel_btn'), 'cancel')]
             ]));
             return ctx.wizard.next();
@@ -974,7 +974,7 @@ function buildScenes(SECTIONS) {
                 return ctx.scene.leave();
             }
             if (cbData === 'cat_Norasmiy' || cbData === 'cat_Rasmiy') {
-                ctx.wizard.state.category = cbData === 'cat_Norasmiy' ? 'Norasmiy' : 'Rasmiy';
+                ctx.wizard.state.category = 'cat_2';
                 await ctx.reply(t(lang, 'scene_expense_type_add_prompt'), Markup.inlineKeyboard([
                     [Markup.button.callback(t(lang, 'scene_cancel_btn'), 'cancel')]
                 ]));
@@ -994,7 +994,7 @@ function buildScenes(SECTIONS) {
                 return;
             }
             const typeName = ctx.message.text.trim();
-            const category = ctx.wizard.state.category || 'Norasmiy';
+            const category = 'cat_1';
             try {
                 await storage.addExpenseType(typeName, category);
                 await ctx.reply(t(lang, 'scene_expense_type_add_success', { name: `${typeName} (${category})` }));
@@ -1037,7 +1037,7 @@ function buildScenes(SECTIONS) {
                 return;
             }
             await ctx.reply('Qaysi toifadan turni olib tashlaysiz?', Markup.inlineKeyboard([
-                [Markup.button.callback('Norasmiy', 'cat_Norasmiy'), Markup.button.callback('Rasmiy', 'cat_Rasmiy')],
+                [Markup.button.callback('cat_1', 'cat_Norasmiy'), Markup.button.callback('cat_2', 'cat_Rasmiy')],
                 [Markup.button.callback(t(lang, 'scene_cancel_btn'), 'cancel')]
             ]));
             return ctx.wizard.next();
@@ -1053,7 +1053,7 @@ function buildScenes(SECTIONS) {
                 return ctx.scene.leave();
             }
             if (cbData === 'cat_Norasmiy' || cbData === 'cat_Rasmiy') {
-                const category = cbData === 'cat_Norasmiy' ? 'Norasmiy' : 'Rasmiy';
+                const category = 'cat_2';
                 ctx.wizard.state.category = category;
                 const types = await storage.getExpenseTypes(category);
                 if (types.length === 0) {

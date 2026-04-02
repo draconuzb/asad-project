@@ -190,8 +190,8 @@ async function dispatchToDb(sectionKey, reportData, userId = 'system') {
 
         } else if (sectionKey === 'moliya_kirim' || sectionKey === 'moliya_kirim_rasmiy' || sectionKey === 'moliya_kirim_norasmiy') {
             let incomeToifa = '-';
-            if (sectionKey === 'moliya_kirim_rasmiy') incomeToifa = 'Rasmiy';
-            else if (sectionKey === 'moliya_kirim_norasmiy') incomeToifa = 'Norasmiy';
+            if (sectionKey === 'moliya_kirim_rasmiy') incomeToifa = 'cat_2';
+            else if (sectionKey === 'moliya_kirim_norasmiy') incomeToifa = 'cat_1';
 
             const incomeAmt = safeInt(reportData.today_income);
             // For norasmiy, kassa_amount = income amount (wizard doesn't ask separately)
@@ -216,8 +216,8 @@ async function dispatchToDb(sectionKey, reportData, userId = 'system') {
             const kStd = safeInt(reportData.today_kassa_students);
 
             let delToifa = '-';
-            if (sectionKey === 'moliya_kirim_rasmiy_del') delToifa = 'Rasmiy';
-            else if (sectionKey === 'moliya_kirim_norasmiy_del') delToifa = 'Norasmiy';
+            if (sectionKey === 'moliya_kirim_rasmiy_del') delToifa = 'cat_2';
+            else if (sectionKey === 'moliya_kirim_norasmiy_del') delToifa = 'cat_1';
 
             const delMonth = normalizeMonth(reportData.month) || '';
             const delIncAmt = Math.abs(inc) || Math.abs(kAmt);
@@ -235,7 +235,7 @@ async function dispatchToDb(sectionKey, reportData, userId = 'system') {
                         db.prepare('INSERT INTO debtors (timestamp, date_ymd, count, amount, month, manager_id) VALUES (?, ?, ?, ?, ?, ?)')
                             .run(timestamp, dateYmd, actualStudentCount, delIncAmt, delMonth, userId);
                         db.prepare('INSERT INTO qarzdorlar_log (month, date_ymd, change_amount, type, note, manager_id) VALUES (?, ?, ?, ?, ?, ?)')
-                            .run(delMonth, dateYmd, delIncAmt, 'norasmiy_reversal', `Norasmiy tushum bekor: +${delIncAmt} (${actualStudentCount} o'quvchi)`, userId);
+                            .run(delMonth, dateYmd, delIncAmt, 'norasmiy_reversal', `Tushum bekor: +${delIncAmt} (${actualStudentCount} o'quvchi)`, userId);
                         db.prepare('UPDATE qarzdorlar_log SET note = note || ? WHERE id = ?')
                             .run(' [reversed]', deduction.id);
                     }
@@ -243,15 +243,15 @@ async function dispatchToDb(sectionKey, reportData, userId = 'system') {
             })();
 
         } else if (sectionKey === 'moliya_chiqim' || sectionKey === 'moliya_chiqim_rasmiy' || sectionKey === 'moliya_chiqim_norasmiy') {
-            let toifa = 'Norasmiy';
+            let toifa = 'cat_1';
             if (sectionKey === 'moliya_chiqim_rasmiy') {
-                toifa = 'Rasmiy';
+                toifa = 'cat_2';
             } else if (sectionKey === 'moliya_chiqim_norasmiy') {
-                toifa = 'Norasmiy';
+                toifa = 'cat_1';
             } else {
                 const rawCat = reportData.expense_category || '';
                 // M-32: More robust emoji stripping
-                toifa = rawCat.replace(/[\p{Emoji}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}\p{Extended_Pictographic}\s]+/gu, '').trim() || 'Norasmiy';
+                toifa = rawCat.replace(/[\p{Emoji}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}\p{Extended_Pictographic}\s]+/gu, '').trim() || 'cat_1';
             }
 
             const chiqimMonth = normalizeMonth(reportData.month) || '';
@@ -265,7 +265,7 @@ async function dispatchToDb(sectionKey, reportData, userId = 'system') {
             const exp = safeInt(reportData.today_expense);
             const rawCat = reportData.expense_category || '';
             // M-32: More robust emoji stripping
-            const toifa = rawCat.replace(/[\p{Emoji}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}\p{Extended_Pictographic}\s]+/gu, '').trim() || 'Norasmiy';
+            const toifa = rawCat.replace(/[\p{Emoji}\p{Emoji_Presentation}\p{Emoji_Modifier_Base}\p{Extended_Pictographic}\s]+/gu, '').trim() || 'cat_1';
             const delChiqimMonth = normalizeMonth(reportData.month) || '';
             db.transaction(() => {
                 const existingExpense = db.prepare(`SELECT id FROM finance WHERE expense > 0 AND ABS(expense) = ? AND month = ? AND LOWER(TRIM(category)) = ? AND expense_type = ? AND COALESCE(comment,'') != '[REVERSED]' LIMIT 1`).get(Math.abs(exp), delChiqimMonth, toifa.toLowerCase(), reportData.expense_type || '');
@@ -576,12 +576,12 @@ async function getFinanceByMonth() {
             END AS month_key,
             SUM(income) AS income,
             SUM(expense) AS expense,
-            SUM(CASE WHEN LOWER(TRIM(category)) = 'rasmiy' THEN income ELSE 0 END) AS income_rasmiy,
-            SUM(CASE WHEN LOWER(TRIM(category)) = 'norasmiy' THEN income ELSE 0 END) AS income_norasmiy,
-            SUM(CASE WHEN LOWER(TRIM(category)) NOT IN ('rasmiy', 'norasmiy') THEN income ELSE 0 END) AS income_uncategorized,
-            SUM(CASE WHEN LOWER(TRIM(category)) = 'rasmiy' THEN expense ELSE 0 END) AS expense_rasmiy,
-            SUM(CASE WHEN LOWER(TRIM(category)) = 'norasmiy' THEN expense ELSE 0 END) AS expense_norasmiy,
-            SUM(CASE WHEN LOWER(TRIM(category)) NOT IN ('rasmiy', 'norasmiy') THEN expense ELSE 0 END) AS expense_uncategorized,
+            SUM(CASE WHEN category = 'cat_2' THEN income ELSE 0 END) AS income_rasmiy,
+            SUM(CASE WHEN category = 'cat_1' THEN income ELSE 0 END) AS income_norasmiy,
+            SUM(CASE WHEN LOWER(TRIM(category)) NOT IN ('cat_1', 'cat_2') THEN income ELSE 0 END) AS income_uncategorized,
+            SUM(CASE WHEN category = 'cat_2' THEN expense ELSE 0 END) AS expense_rasmiy,
+            SUM(CASE WHEN category = 'cat_1' THEN expense ELSE 0 END) AS expense_norasmiy,
+            SUM(CASE WHEN category NOT IN ('cat_1', 'cat_2') THEN expense ELSE 0 END) AS expense_uncategorized,
             SUM(kassa_amount) AS kassa_amount,
             SUM(kassa_students) AS kassa_students
         FROM finance
@@ -648,7 +648,7 @@ async function getFinanceByMonth() {
             mn = eRow.month_key ? normalizeMonthKey(eRow.month_key) || "Noma'lum" : "Noma'lum";
         }
         if (!totalsByMonth[mn]) continue;
-        const target = eRow.cat === 'rasmiy' ? 'expenses_by_type_rasmiy' : 'expenses_by_type';
+        const target = eRow.cat === 'cat_2' ? 'expenses_by_type_rasmiy' : 'expenses_by_type';
         totalsByMonth[mn][target][eRow.etype] = (totalsByMonth[mn][target][eRow.etype] || 0) + eRow.total_expense;
     }
 
@@ -1068,17 +1068,17 @@ async function fetchAllData(startDateYmd, endDateYmd, financeAccountingMonth = n
 
         const rowCategory = (row.category || '').trim().toLowerCase();
         if (row.income !== 0) {
-            if (rowCategory === 'rasmiy') fIncomeRasmiy += row.income;
-            else if (rowCategory === 'norasmiy') fIncomeNorasmiy += row.income;
+            if (rowCategory === 'cat_2') fIncomeRasmiy += row.income;
+            else if (rowCategory === 'cat_1') fIncomeNorasmiy += row.income;
         }
         if (row.expense !== 0) {
             const eType = (row.expense_type && row.expense_type.trim() !== '-' && row.expense_type.trim() !== '')
                 ? row.expense_type.trim() : 'Boshqa xarajat';
             fExpenseDetails.push({ type: eType, amount: row.expense, category: rowCategory });
-            if (rowCategory === 'rasmiy') {
+            if (rowCategory === 'cat_2') {
                 fExpenseRasmiy += row.expense;
                 fExpensesByTypeRasmiy[eType] = (fExpensesByTypeRasmiy[eType] || 0) + row.expense;
-            } else if (rowCategory === 'norasmiy') {
+            } else if (rowCategory === 'cat_1') {
                 fExpenseNorasmiy += row.expense;
                 fExpensesByType[eType] = (fExpensesByType[eType] || 0) + row.expense;
             }
@@ -1337,7 +1337,7 @@ async function deductFromQarzdorlar(month, amount, studentCount, userId) {
         db.prepare('INSERT INTO debtors (timestamp, date_ymd, count, amount, month, manager_id) VALUES (?, ?, ?, ?, ?, ?)')
             .run(timestamp, dateYmd, -Math.abs(studentCount), -Math.abs(amount), normMonth, userId);
         db.prepare('INSERT INTO qarzdorlar_log (month, date_ymd, change_amount, type, note, manager_id) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(normMonth, dateYmd, -Math.abs(amount), 'norasmiy_deduction', "Norasmiy tushum hisobidan yechildi (" + studentCount + " ta o'quvchi)", userId);
+            .run(normMonth, dateYmd, -Math.abs(amount), 'norasmiy_deduction', "Tushum hisobidan yechildi (" + studentCount + " ta o'quvchi)", userId);
     })();
 }
 

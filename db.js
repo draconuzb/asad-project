@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS subjects (
 CREATE TABLE IF NOT EXISTS expense_types (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    category TEXT NOT NULL DEFAULT 'Norasmiy',
+    category TEXT NOT NULL DEFAULT 'cat_1',
     created_at TEXT NOT NULL DEFAULT '',
     UNIQUE(name, category)
 );
@@ -475,5 +475,37 @@ safeMigration('CREATE INDEX IF NOT EXISTS idx_hr_staff_branches_bid ON hr_staff_
 // Cron assignments: add type and sections columns for report-based notifications
 safeMigration("ALTER TABLE cron_assignments ADD COLUMN type TEXT NOT NULL DEFAULT 'message'", 'cron_assignments: add type column');
 safeMigration("ALTER TABLE cron_assignments ADD COLUMN sections TEXT NOT NULL DEFAULT ''", 'cron_assignments: add sections column');
+
+
+// ── Configurable Finance Categories ──
+db.exec(`
+CREATE TABLE IF NOT EXISTS finance_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    label TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#06b6d4',
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+`);
+
+// Seed default categories if empty
+try {
+    const catCount = db.prepare("SELECT COUNT(*) as c FROM finance_categories").get().c;
+    if (catCount === 0) {
+        db.prepare("INSERT INTO finance_categories (key, label, color, sort_order) VALUES (?, ?, ?, ?)").run('cat_1', 'Naqd', '#06b6d4', 1);
+        db.prepare("INSERT INTO finance_categories (key, label, color, sort_order) VALUES (?, ?, ?, ?)").run('cat_2', 'Bank', '#8b5cf6', 2);
+        logger.info('Finance categories seeded: Naqd, Bank');
+    }
+} catch(e) { logger.warn('finance_categories seed:', e.message); }
+
+// Migrate existing data: Norasmiy → cat_1, Rasmiy → cat_2
+// One-time migration (skip if already done)
+if (db.prepare("SELECT COUNT(*) as c FROM finance WHERE LOWER(TRIM(category)) IN ('norasmiy','rasmiy')").get().c > 0) {
+    safeMigration("UPDATE finance SET category = 'cat_1' WHERE LOWER(TRIM(category)) = 'norasmiy'", 'finance: migrate Norasmiy → cat_1');
+safeMigration("UPDATE finance SET category = 'cat_2' WHERE LOWER(TRIM(category)) = 'rasmiy'", 'finance: migrate Rasmiy → cat_2');
+safeMigration("UPDATE expense_types SET category = 'cat_1' WHERE LOWER(TRIM(category)) = 'norasmiy'", 'expense_types: migrate Norasmiy → cat_1');
+safeMigration("UPDATE expense_types SET category = 'cat_2' WHERE LOWER(TRIM(category)) = 'rasmiy'", 'expense_types: migrate Rasmiy → cat_2');
+}
+
 
 module.exports = db;

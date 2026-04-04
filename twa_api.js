@@ -2478,8 +2478,9 @@ function createTwaApi(bot, botToken, getAuthorizedUsers, setAuthorizedUsers) {
                     // Cap deduction at the current balance to prevent negative debtor balance
                     const cappedAmount = Math.min(ka, currentBalance);
                     const cappedStudents = cappedAmount < ka ? Math.round(ks * cappedAmount / ka) : ks;
-                    // Create finance income record so books balance
-                    db.prepare('INSERT INTO finance (timestamp, income, expense, month, kassa_amount, kassa_students, expense_type, category, comment, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(ts, cappedAmount, mo, cappedAmount, cappedStudents, '', 'cat_1', cmt, tid, ts, today, bid);
+                    // NOTE: finance income is NOT inserted here — it was already recorded
+                    // by the preceding finance_income_unofficial call from TWA frontend.
+                    // Adding it here caused double-counting (bug fix 2026-04-04).
                     // Reduce debtor balance (capped so it cannot go negative)
                     db.prepare('INSERT INTO debtors (timestamp, count, amount, month, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(ts, -cappedStudents, -cappedAmount, mo, tid, ts, today, bid);
                     db.prepare("INSERT INTO qarzdorlar_log (month, change_amount, type, note, manager_id, created_at, date_ymd, branch_id) VALUES (?, ?, 'norasmiy_deduction', 'TWA: Kirim ayirish', ?, ?, ?, ?)").run(mo, -cappedAmount, tid, ts, today, bid);
